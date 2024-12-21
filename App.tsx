@@ -1,176 +1,172 @@
-import React, { useEffect } from 'react';
-import { Platform, View, Button, StyleSheet,Alert } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { PermissionsAndroid, Alert, View, Text, Button, Platform } from 'react-native';
 import messaging from '@react-native-firebase/messaging';
-import { PermissionsAndroid } from 'react-native';
 
 const App = () => {
-  // Function to store the FCM token in the backend
-  useEffect(()=>{
-    requestAndroidNotificationPermission()
-  },[])
+  const [fcmToken, setFcmToken] = useState('');
+
+  // Request notification permission and get FCM token
   useEffect(() => {
-    messaging().onMessage(async (remoteMessage) => {
-      console.log('Foreground message:', remoteMessage.notification);
-      // Handle the notification, e.g., show a local alert or display a notification in-app
-    });
-  }, []);
-  useEffect(() => {
-    messaging().onNotificationOpenedApp(remoteMessage => {
-      console.log('Notification opened from background state:', remoteMessage.notification);
-      // Handle notification when app opens from background
-    });
-  
-    messaging().getInitialNotification().then(remoteMessage => {
-      if (remoteMessage) {
-        console.log('App opened from a notification:', remoteMessage.notification);
-        // Handle the notification
-      }
-    });
+    if (Platform.OS === 'android') {
+      requestNotificationPermission();
+    }
+ // Handle notifications in the foreground
+ const unsubscribeOnMessage = messaging().onMessage(async (remoteMessage) => {
+  console.log('Foreground message:', remoteMessage);
+  Alert.alert('Notification Received', remoteMessage.notification.body);
+});
+
+// Background and quit state handler
+const unsubscribeOnNotificationOpened = messaging().onNotificationOpenedApp((remoteMessage) => {
+  console.log('Notification caused app to open:', remoteMessage);
+  Alert.alert('Notification Clicked', remoteMessage.notification.body);
+});
+
+const unsubscribeInitialNotification = messaging()
+  .getInitialNotification()
+  .then((remoteMessage) => {
+    if (remoteMessage) {
+      console.log('App opened from quit state by notification:', remoteMessage);
+      Alert.alert('Notification Clicked (Quit State)', remoteMessage.notification.body);
+    }
+  });
+
+  return () => {
+    unsubscribeOnMessage();
+    unsubscribeOnNotificationOpened();
+    unsubscribeInitialNotification();
+  };
+
   }, []);
 
-  const requestAndroidNotificationPermission = async () => {
-    if (Platform.OS === 'android' && Platform.Version >= 33) {
-      const granted = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
-      );
-      if (granted === PermissionsAndroid.RESULTS.GRANTED) {
-        console.log("Notification permission granted.");
-      } else {
-        console.log("Notification permission denied.");
+  const requestNotificationPermission = async () => {
+    if (Platform.OS === 'android') {
+      try {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
+        );
+
+        if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+          console.log('Notification permission granted');
+          getFcmToken(); // Fetch the FCM token
+        } else if (granted === PermissionsAndroid.RESULTS.DENIED) {
+          Alert.alert(
+            'Permission Denied',
+            'Notification permissions are required to stay updated. Please enable them in Settings.',
+            [{ text: 'OK' }]
+          );
+        } else if (granted === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) {
+          Alert.alert(
+            'Permission Blocked',
+            'Notification permissions are blocked. Please enable them in Settings.',
+            [{ text: 'OK' }]
+          );
+        }
+      } catch (err) {
+        console.warn(err);
       }
     }
   };
-    
-  const storeFcmToken = async (adminToken) => {
+
+  // ********************* Receive notification ******************** // 
+
+  
+
+  // **************************** Storing FCMToken ************************* //
+  const getFcmToken = async () => {
     try {
-      // Replace with the actual user ID
-      const user_id = 1;
-      console.log("ghhji")
-      // Make the API call
-      const response = await fetch('http://192.168.213.65:8080/admintoken/save', {
+      const token = await messaging().getToken();
+      if (token) {
+        console.log('FCM Token:', token);
+        setFcmToken(token);
+      } else {
+        console.log('No FCM token received');
+      }
+    } catch (error) {
+      console.error('Error fetching FCM token:', error);
+    }
+  };
+
+  // **************************** Save Token to Backend ************************* //
+  const saveAdminToken = async () => {
+    const userId = 1
+    console.log(fcmToken,"received")
+    if (!userId || !fcmToken) {
+      Alert.alert('Error', 'User ID and Admin token are required');
+      return;
+    }
+
+    try {
+      const response = await fetch('http://192.168.75.47:8080/admintoken/save', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          user_id,
-          admin_token: adminToken, // Pass the stored FCM token
+          user_id: 1,
+          admin_token: fcmToken,
         }),
       });
-  
-      // Parse the response
-      console.log(response,"response")
-      const responseJson = await response.json();
-      console.log('Server Response:', responseJson);
-  
+
+      const data = await response.json();
+
       if (response.ok) {
-        console.log('Admin token saved successfully:', responseJson);
-        Alert.alert('Success', 'Admin token saved successfully');
+        Alert.alert('Success', data.message);
       } else {
-        console.error('Error saving admin token:', responseJson.message || 'Unknown error');
-        Alert.alert('Error', responseJson.message || 'Failed to save admin token');
+        Alert.alert('Error', data.message || 'Failed to save Admin token');
       }
     } catch (error) {
-      console.error('Error storing FCM token:', error);
-      Alert.alert('Error', 'An unexpected error occurred while saving the admin token');
+      console.error('Error saving Admin token:', error);
+      Alert.alert('Error', 'Something went wrong. Please try again.');
     }
   };
 
-  useEffect(() => {
-    // Request permission to receive notifications (iOS only)
-    if (Platform.OS === 'ios') {
-      messaging()
-        .requestPermission()
-        .then((authStatus) => {
-          const enabled =
-            authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
-            authStatus === messaging.AuthorizationStatus.PROVISIONAL;
-          if (enabled) {
-            console.log('Notification permission granted');
-          } else {
-            console.log('Notification permission denied');
-          }
-        });
-    }
-
-    // Get FCM token and store it in a constant
-    const getAndStoreFcmToken = async () => {
+// send notification 
+       const handleSendNotification = async () => {
       try {
-        const fcmToken = await messaging().getToken();
-        if (fcmToken) {
-          console.log('FCM Token:', fcmToken);
-          // Store the FCM token in a constant variable
-          const adminToken = fcmToken;
-          // Send the token to the backend
-          storeFcmToken(adminToken);
+        const response = await fetch('http://192.168.75.47:8080/admin/notification', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            message: 'hi ji',
+            userId: 1
+          }),
+        });
+  
+        const data = await response.json();
+  
+        if (response.ok) {
+          Alert.alert('Success', data.message);
         } else {
-          console.log('No FCM token found');
+          Alert.alert('Error', data.error || 'Something went wrong');
         }
       } catch (error) {
-        console.error('Error retrieving FCM token:', error);
+        console.error('Error sending notification:', error);
+        Alert.alert('Error', 'Failed to send notification');
       }
     };
-
-    getAndStoreFcmToken();
-
-    // Handle background notification
-    messaging().onNotificationOpenedApp(remoteMessage => {
-      console.log('Notification caused app to open from background state:', remoteMessage.notification);
-    });
-
-    // Handle when app is completely closed
-    messaging().onMessage(async remoteMessage => {
-      console.log('Foreground message:', remoteMessage.notification);
-    });
-  }, []);
-
-  // Function to send notification request
-  const sendNotificationRequest = async () => {
-    console.log("clicked")
-    try {
-      const response = await fetch('http://192.168.213.65:8080/admin/notification', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: 'This is a test notification',
-          userId: 1, // Replace with the actual user ID
-        }),
-      });
-  
-      // Log the response status and full response
-      console.log('Response Status:', response.status);
-      const responseData = await response.json();
-      console.log('Response Data:', responseData);
-  
-      if (response.ok) {
-        console.log('Notification sent successfully:', responseData);
-      } else {
-        console.error('Error sending notification:', responseData.error);
-      }
-    } catch (error) {
-      console.error('Error sending notification:', error);
-    }
-  };
-  
-
   return (
-    <View style={styles.container}>
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <Text style={{ marginBottom: 10 }}>Android Notification Permission Example</Text>
+      <Button title="Request Permission" onPress={requestNotificationPermission} />
+      {fcmToken ? (
+        <Text style={{ marginTop: 20 }}>FCM Token: {fcmToken}</Text>
+      ) : (
+        <Text style={{ marginTop: 20 }}>Fetching FCM Token...</Text>
+      )}
       <Button
-        title="Request Notification"
-        onPress={sendNotificationRequest}
+        title="Save Token"
+        onPress={saveAdminToken}
+      />
+
+<Button
+        title="Notification"
+        onPress={handleSendNotification}
       />
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-});
 
 export default App;
